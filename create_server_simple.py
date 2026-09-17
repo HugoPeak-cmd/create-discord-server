@@ -2,17 +2,15 @@ import os
 import discord
 from discord import utils
 
-# Скрипт создаёт структуру каналов и ролей примерно по образцу, который ты прислал.
-# Использование:
-# - Вставь DISCORD_TOKEN и TARGET_GUILD_ID в environment (Railway Variables)
-# - Запусти. Скрипт создаст роли, корневые каналы, категории и каналы внутри категорий, затем завершится.
+# Скрипт создаёт структуру сервера "Лунные Вестники" по согласованному шаблону.
+# Перед запуском: установи DISCORD_TOKEN и TARGET_GUILD_ID в environment (Railway Variables).
 
 intents = discord.Intents.default()
 intents.guilds = True
 
 client = discord.Client(intents=intents)
 
-# Роли: (имя, эмодзи)
+# Роли: (имя без эмодзи, эмодзи)
 ROLES = [
     ("Глава Гильдии", "👑"),
     ("Заместитель", "⚜️"),
@@ -25,54 +23,64 @@ ROLES = [
     ("Throne and Liberty", "🔥"),
 ]
 
-# Корневые (топ) каналы, текстовые
+# Отдельные корневые текстовые каналы (в верхней части сервера)
 ROOT_TEXT_CHANNELS = [
-    ("🎉 welcome", "text"),
-    ("🧭 навигация", "text"),
+    ("✅ welcome", "text"),
+    ("📍 навигация", "text"),
     ("🎭 роли", "text"),
+]
+
+# Раздел "Важные штуки"
+IMPORTANT_CHANNELS = [
     ("📣 объявления", "text"),
-    ("🎁 розыгрыши", "text"),
+    ("🎉 розыгрыши", "text"),
     ("📺 youtube", "text"),
     ("❗ проблемы", "text"),
 ]
 
-# Категории и их каналы
-# Формат: (категория_база, эмодзи, [ (channel_name, type) ... ])
+# Категории и их каналы (категория_база, эмодзи, список( (name, type) ))
 CATEGORIES = [
-    ("Aion Classic", "💠", [
-        ("новости-aion-classic", "text"),
+    ("Общение", "💬", [
+        ("общий-флуд", "text"),
+        ("black-market", "text"),
+        ("чёрная-книжка", "text"),
+        ("вступление-в-легион", "text"),
+    ]),
+
+    ("AION 2", "❤️", [
+        ("новости-aion-2", "text"),
         ("гайды", "text"),
-        ("общий", "text"),
-        ("сбор-в-данж", "text"),
-        ("сбор-кп", "text"),
-        ("Общий голосовой", "voice"),
-        ("Пати 1", "voice"),
-        ("Пати 2", "voice"),
-        ("Пати 3", "voice"),
+        ("ошибка-решение", "text"),
+        ("легионы", "text"),
+        ("общий-голосовой", "voice"),
+        ("пати-1", "voice"),
+        ("пати-2", "voice"),
         ("🔴 стрим", "voice"),
     ]),
-    ("Throne and Liberty", "🔥", [
-        ("новости-throne", "text"),
-        ("гайды-tl", "text"),
-        ("общий-tl", "text"),
-        ("сбор-в-данж-tl", "text"),
-        ("Общий голосовой", "voice"),
-        ("Пати 1", "voice"),
-        ("Пати 2", "voice"),
+
+    ("Aion Classic", "💠", [
+        ("новости-classic-ru", "text"),
+        ("гайды-classic", "text"),
+        ("будущее-обновление", "text"),
+        ("общий-голосовой", "voice"),
+        ("пати-1", "voice"),
+        ("пати-2", "voice"),
         ("🔴 стрим", "voice"),
     ]),
+
     ("Музыка", "🎵", [
         ("музыкальный-чат", "text"),
         ("музыкальная-комната", "voice"),
     ]),
-    ("КАНАЛЫ СИЛЬНЫХ", "💙", [
+
+    ("КАНАЛЫ СИЛЬНЫХ", "🔧", [
         ("панель-управления", "text"),
         ("админ-голос", "voice"),
     ]),
 ]
 
-# Дополнительные корневые каналы, которые можно создать
-EXTRA_ROOT = ["rules", "info", "бот-команды"]
+# Дополнительные корневые
+EXTRA_ROOT = [("rules", "text"), ("info", "text"), ("бот-команды", "text")]
 
 
 def desired_name(base, emoji):
@@ -132,7 +140,6 @@ async def ensure_category_and_channels(guild, base, emoji, channels):
         return
 
     for ch_name, ch_type in channels:
-        # Добавляем префиксы emoji не нужно — делаем имена "чистыми" (как в шаблоне)
         final_name = ch_name
         if ch_type == "text":
             existing_ch = discord.utils.get(category.text_channels, name=final_name)
@@ -176,19 +183,23 @@ async def on_ready():
         await client.close()
         return
 
-    # Создаём/обновляем роли
+    # Роли
     for base, emoji in ROLES:
         await ensure_role(guild, base, emoji)
 
-    # Создаём корневые текстовые каналы
+    # Верхние корневые каналы
     for ch_name, _ in ROOT_TEXT_CHANNELS:
         await ensure_text_channel(guild, ch_name)
 
-    # Создаём дополнительные корневые
-    for ch in EXTRA_ROOT:
-        await ensure_text_channel(guild, ch)
+    # Важные
+    for ch_name, _ in IMPORTANT_CHANNELS:
+        await ensure_text_channel(guild, ch_name)
 
-    # Создаём категории и их каналы
+    # Дополнительные корневые
+    for ch_name, _ in EXTRA_ROOT:
+        await ensure_text_channel(guild, ch_name)
+
+    # Категории и их каналы
     for base, emoji, channels in CATEGORIES:
         await ensure_category_and_channels(guild, base, emoji, channels)
 

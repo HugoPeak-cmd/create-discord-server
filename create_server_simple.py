@@ -2,7 +2,11 @@ import os
 import discord
 from discord import utils
 
-# Интенты
+# Скрипт создаёт структуру каналов и ролей примерно по образцу, который ты прислал.
+# Использование:
+# - Вставь DISCORD_TOKEN и TARGET_GUILD_ID в environment (Railway Variables)
+# - Запусти. Скрипт создаст роли, корневые каналы, категории и каналы внутри категорий, затем завершится.
+
 intents = discord.Intents.default()
 intents.guilds = True
 
@@ -17,28 +21,139 @@ ROLES = [
     ("Девочка", "👧"),
     ("Стример", "🎥"),
     ("Модер", "🔨"),
-    ("Aion Classic", "🛡️"),
-    ("Throne and Liberty", "👑"),
+    ("Aion Classic", "💠"),
+    ("Throne and Liberty", "🔥"),
 ]
 
-# Категории и каналы внутри них
+# Корневые (топ) каналы, текстовые
+ROOT_TEXT_CHANNELS = [
+    ("🎉 welcome", "text"),
+    ("🧭 навигация", "text"),
+    ("🎭 роли", "text"),
+    ("📣 объявления", "text"),
+    ("🎁 розыгрыши", "text"),
+    ("📺 youtube", "text"),
+    ("❗ проблемы", "text"),
+]
+
+# Категории и их каналы
+# Формат: (категория_база, эмодзи, [ (channel_name, type) ... ])
 CATEGORIES = [
-    ("Aion Classic", "🛡️"),
-    ("Throne and Liberty", "👑"),
+    ("Aion Classic", "💠", [
+        ("новости-aion-classic", "text"),
+        ("гайды", "text"),
+        ("общий", "text"),
+        ("сбор-в-данж", "text"),
+        ("сбор-кп", "text"),
+        ("Общий голосовой", "voice"),
+        ("Пати 1", "voice"),
+        ("Пати 2", "voice"),
+        ("Пати 3", "voice"),
+        ("🔴 стрим", "voice"),
+    ]),
+    ("Throne and Liberty", "🔥", [
+        ("новости-throne", "text"),
+        ("гайды-tl", "text"),
+        ("общий-tl", "text"),
+        ("сбор-в-данж-tl", "text"),
+        ("Общий голосовой", "voice"),
+        ("Пати 1", "voice"),
+        ("Пати 2", "voice"),
+        ("🔴 стрим", "voice"),
+    ]),
+    ("Музыка", "🎵", [
+        ("музыкальный-чат", "text"),
+        ("музыкальная-комната", "voice"),
+    ]),
+    ("КАНАЛЫ СИЛЬНЫХ", "💙", [
+        ("панель-управления", "text"),
+        ("админ-голос", "voice"),
+    ]),
 ]
 
-# Для каждой категории создаются эти каналы (имя, тип)
-CHANNELS_IN_CATEGORY = [
-    ("общий", "text"),
-    ("🔴 стрим", "voice"),  # сюда будешь стримить
-]
-
-# Дополнительные корневые каналы (по желанию)
-ROOT_TEXT_CHANNELS = ["welcome", "rules", "announcements"]
+# Дополнительные корневые каналы, которые можно создать
+EXTRA_ROOT = ["rules", "info", "бот-команды"]
 
 
 def desired_name(base, emoji):
     return f"{emoji} {base}"
+
+async def ensure_role(guild, base, emoji):
+    name = desired_name(base, emoji)
+    existing = next((r for r in guild.roles if base in r.name), None)
+    if existing:
+        if existing.name != name:
+            try:
+                await existing.edit(name=name)
+                print(f"Renamed role '{existing.name}' -> '{name}'")
+            except Exception as e:
+                print(f"Failed to rename role {existing.name}: {e}")
+        else:
+            print(f"Role already exists: {name}")
+    else:
+        try:
+            await guild.create_role(name=name)
+            print(f"Created role: {name}")
+        except Exception as e:
+            print(f"Failed to create role {name}: {e}")
+
+async def ensure_text_channel(guild, name):
+    existing = discord.utils.get(guild.text_channels, name=name)
+    if existing:
+        print(f"Text channel exists: {name}")
+    else:
+        try:
+            await guild.create_text_channel(name)
+            print(f"Created text channel: {name}")
+        except Exception as e:
+            print(f"Failed to create text channel {name}: {e}")
+
+async def ensure_category_and_channels(guild, base, emoji, channels):
+    cat_name = desired_name(base, emoji)
+    category = next((c for c in guild.categories if base in c.name), None)
+    if category:
+        if category.name != cat_name:
+            try:
+                await category.edit(name=cat_name)
+                print(f"Renamed category '{category.name}' -> '{cat_name}'")
+            except Exception as e:
+                print(f"Failed to rename category {category.name}: {e}")
+        else:
+            print(f"Category already exists: {cat_name}")
+    else:
+        try:
+            category = await guild.create_category(cat_name)
+            print(f"Created category: {cat_name}")
+        except Exception as e:
+            print(f"Failed to create category {cat_name}: {e}")
+            category = None
+
+    if not category:
+        return
+
+    for ch_name, ch_type in channels:
+        # Добавляем префиксы emoji не нужно — делаем имена "чистыми" (как в шаблоне)
+        final_name = ch_name
+        if ch_type == "text":
+            existing_ch = discord.utils.get(category.text_channels, name=final_name)
+            if existing_ch:
+                print(f"Text channel exists in '{cat_name}': {final_name}")
+            else:
+                try:
+                    await category.create_text_channel(final_name)
+                    print(f"Created text channel '{final_name}' in category '{cat_name}'")
+                except Exception as e:
+                    print(f"Failed to create text channel '{final_name}' in '{cat_name}': {e}")
+        elif ch_type == "voice":
+            existing_vch = discord.utils.get(category.voice_channels, name=final_name)
+            if existing_vch:
+                print(f"Voice channel exists in '{cat_name}': {final_name}")
+            else:
+                try:
+                    await category.create_voice_channel(final_name)
+                    print(f"Created voice channel '{final_name}' in category '{cat_name}'")
+                except Exception as e:
+                    print(f"Failed to create voice channel '{final_name}' in '{cat_name}': {e}")
 
 @client.event
 async def on_ready():
@@ -61,83 +176,21 @@ async def on_ready():
         await client.close()
         return
 
-    # Создаём / обновляем роли
+    # Создаём/обновляем роли
     for base, emoji in ROLES:
-        name = desired_name(base, emoji)
-        existing = next((r for r in guild.roles if base in r.name), None)
-        if existing:
-            if existing.name != name:
-                try:
-                    await existing.edit(name=name)
-                    print(f"Renamed role '{existing.name}' -> '{name}'")
-                except Exception as e:
-                    print(f"Failed to rename role {existing.name}: {e}")
-            else:
-                print(f"Role already exists: {name}")
-        else:
-            try:
-                await guild.create_role(name=name)
-                print(f"Created role: {name}")
-            except Exception as e:
-                print(f"Failed to create role {name}: {e}")
+        await ensure_role(guild, base, emoji)
 
-    # Создаём корневые текстовые каналы (если не существует)
-    for ch_name in ROOT_TEXT_CHANNELS:
-        existing = discord.utils.get(guild.text_channels, name=ch_name)
-        if existing:
-            print(f"Root text channel exists: {ch_name}")
-        else:
-            try:
-                await guild.create_text_channel(ch_name)
-                print(f"Created root text channel: {ch_name}")
-            except Exception as e:
-                print(f"Failed to create root channel {ch_name}: {e}")
+    # Создаём корневые текстовые каналы
+    for ch_name, _ in ROOT_TEXT_CHANNELS:
+        await ensure_text_channel(guild, ch_name)
 
-    # Создаём / обновляем категории и каналы внутри них
-    for base, emoji in CATEGORIES:
-        cat_name = desired_name(base, emoji)
-        category = next((c for c in guild.categories if base in c.name), None)
-        if category:
-            if category.name != cat_name:
-                try:
-                    await category.edit(name=cat_name)
-                    print(f"Renamed category '{category.name}' -> '{cat_name}'")
-                except Exception as e:
-                    print(f"Failed to rename category {category.name}: {e}")
-            else:
-                print(f"Category already exists: {cat_name}")
-        else:
-            try:
-                category = await guild.create_category(cat_name)
-                print(f"Created category: {cat_name}")
-            except Exception as e:
-                print(f"Failed to create category {cat_name}: {e}")
-                category = None
+    # Создаём дополнительные корневые
+    for ch in EXTRA_ROOT:
+        await ensure_text_channel(guild, ch)
 
-        # Если категория создана/найдена — создать в ней каналы
-        if category:
-            for ch_base, ch_type in CHANNELS_IN_CATEGORY:
-                ch_name = ch_base
-                if ch_type == "text":
-                    existing_ch = discord.utils.get(category.text_channels, name=ch_name)
-                    if existing_ch:
-                        print(f"Text channel exists in '{cat_name}': {ch_name}")
-                    else:
-                        try:
-                            await category.create_text_channel(ch_name)
-                            print(f"Created text channel '{ch_name}' in category '{cat_name}'")
-                        except Exception as e:
-                            print(f"Failed to create text channel '{ch_name}' in '{cat_name}': {e}")
-                elif ch_type == "voice":
-                    existing_vch = discord.utils.get(category.voice_channels, name=ch_name)
-                    if existing_vch:
-                        print(f"Voice channel exists in '{cat_name}': {ch_name}")
-                    else:
-                        try:
-                            await category.create_voice_channel(ch_name)
-                            print(f"Created voice channel '{ch_name}' in category '{cat_name}'")
-                        except Exception as e:
-                            print(f"Failed to create voice channel '{ch_name}' in '{cat_name}': {e}")
+    # Создаём категории и их каналы
+    for base, emoji, channels in CATEGORIES:
+        await ensure_category_and_channels(guild, base, emoji, channels)
 
     print("All done — closing bot.")
     await client.close()

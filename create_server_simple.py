@@ -1,16 +1,22 @@
 import os
+import asyncio
 import discord
 from discord import utils
 
-# Скрипт создаёт структуру сервера "Лунные Вестники" по согласованному шаблону.
-# Перед запуском: установи DISCORD_TOKEN и TARGET_GUILD_ID в environment (Railway Variables).
+# create_guild_exact.py
+# Создаёт структуру сервера "Лунные Вестники" точно по согласованному шаблону
+# и запускает persistent-бот, который поддерживает систему self-roles через реакции.
+# Перед запуском установи в окружении:
+# DISCORD_TOKEN — токен бота
+# TARGET_GUILD_ID — ID сервера (куда создавать)
 
 intents = discord.Intents.default()
 intents.guilds = True
+intents.members = True  # нужно для назначения ролей
 
 client = discord.Client(intents=intents)
 
-# Роли: (имя без эмодзи, эмодзи)
+# Роли (имя, эмодзи) — все роли будут созданы. Список порядка соответствует желаемому.
 ROLES = [
     ("Глава Гильдии", "👑"),
     ("Заместитель", "⚜️"),
@@ -23,14 +29,32 @@ ROLES = [
     ("Throne and Liberty", "🔥"),
 ]
 
-# Отдельные корневые текстовые каналы (в верхней части сервера)
-ROOT_TEXT_CHANNELS = [
+# Какие роли можно выбрать самостоятельно (reaction-role)
+SELF_ASSIGN_ROLES = [
+    "Новичек",
+    "Девочка",
+    "Стример",
+    "Aion Classic",
+    "Throne and Liberty",
+]
+
+# Сопоставление эмодзи -> роль (для реакции)
+# Используются именно эмодзи (unicode). Если поменяешь эмодзи в ROLES, синхронизируй сюда.
+ROLE_EMOJI_MAP = {
+    "🌱": "Новичек",
+    "👧": "Девочка",
+    "🎥": "Стример",
+    "💠": "Aion Classic",
+    "🔥": "Throne and Liberty",
+}
+
+# Верхние каналы (точно как на скриншотах)
+TOP_CHANNELS = [
     ("✅ welcome", "text"),
     ("📍 навигация", "text"),
     ("🎭 роли", "text"),
 ]
 
-# Раздел "Важные штуки"
 IMPORTANT_CHANNELS = [
     ("📣 объявления", "text"),
     ("🎉 розыгрыши", "text"),
@@ -38,16 +62,15 @@ IMPORTANT_CHANNELS = [
     ("❗ проблемы", "text"),
 ]
 
-# Категории и их каналы (категория_база, эмодзи, список( (name, type) ))
+# Остальная структура (категория имя, эмодзи, список каналов (name,type) )
 CATEGORIES = [
-    ("Общение", "💬", [
+    ("💬 Общение", "💬", [
         ("общий-флуд", "text"),
         ("black-market", "text"),
         ("чёрная-книжка", "text"),
         ("вступление-в-легион", "text"),
     ]),
-
-    ("AION 2", "❤️", [
+    ("❤️ AION 2", "❤️", [
         ("новости-aion-2", "text"),
         ("гайды", "text"),
         ("ошибка-решение", "text"),
@@ -57,110 +80,151 @@ CATEGORIES = [
         ("пати-2", "voice"),
         ("🔴 стрим", "voice"),
     ]),
-
-    ("Aion Classic", "💠", [
+    ("💠 Aion Classic", "💠", [
         ("новости-classic-ru", "text"),
-        ("гайды-classic", "text"),
+        ("гайды", "text"),
         ("будущее-обновление", "text"),
         ("общий-голосовой", "voice"),
         ("пати-1", "voice"),
         ("пати-2", "voice"),
         ("🔴 стрим", "voice"),
     ]),
-
-    ("Музыка", "🎵", [
+    ("🎵 Музыка", "🎵", [
         ("музыкальный-чат", "text"),
         ("музыкальная-комната", "voice"),
     ]),
-
-    ("КАНАЛЫ СИЛЬНЫХ", "🔧", [
+    ("🔧 КАНАЛЫ СИЛЬНЫХ", "🔧", [
         ("панель-управления", "text"),
         ("админ-голос", "voice"),
     ]),
 ]
 
-# Дополнительные корневые
 EXTRA_ROOT = [("rules", "text"), ("info", "text"), ("бот-команды", "text")]
 
+# Маркер для сообщения с реакциями, чтобы найти и обновить его при перезапуске
+REACTION_MESSAGE_MARKER = "Роли — Лунные Вестники"
 
-def desired_name(base, emoji):
-    return f"{emoji} {base}"
 
-async def ensure_role(guild, base, emoji):
-    name = desired_name(base, emoji)
-    existing = next((r for r in guild.roles if base in r.name), None)
-    if existing:
-        if existing.name != name:
-            try:
-                await existing.edit(name=name)
-                print(f"Renamed role '{existing.name}' -> '{name}'")
-            except Exception as e:
-                print(f"Failed to rename role {existing.name}: {e}")
-        else:
-            print(f"Role already exists: {name}")
-    else:
-        try:
-            await guild.create_role(name=name)
-            print(f"Created role: {name}")
-        except Exception as e:
-            print(f"Failed to create role {name}: {e}")
+async def create_or_get_role(guild: discord.Guild, name: str):
+    role = utils.get(guild.roles, name=name)
+    if role:
+        return role
+    try:
+        role = await guild.create_role(name=name)
+        print(f"Created role: {name}")
+        return role
+    except Exception as e:
+        print(f"Failed to create role {name}: {e}")
+        return None
 
-async def ensure_text_channel(guild, name):
-    existing = discord.utils.get(guild.text_channels, name=name)
-    if existing:
-        print(f"Text channel exists: {name}")
-    else:
-        try:
-            await guild.create_text_channel(name)
-            print(f"Created text channel: {name}")
-        except Exception as e:
-            print(f"Failed to create text channel {name}: {e}")
 
-async def ensure_category_and_channels(guild, base, emoji, channels):
-    cat_name = desired_name(base, emoji)
-    category = next((c for c in guild.categories if base in c.name), None)
-    if category:
-        if category.name != cat_name:
-            try:
-                await category.edit(name=cat_name)
-                print(f"Renamed category '{category.name}' -> '{cat_name}'")
-            except Exception as e:
-                print(f"Failed to rename category {category.name}: {e}")
-        else:
-            print(f"Category already exists: {cat_name}")
-    else:
+async def ensure_text_channel(guild: discord.Guild, name: str):
+    ch = utils.get(guild.text_channels, name=name)
+    if ch:
+        return ch
+    try:
+        ch = await guild.create_text_channel(name)
+        print(f"Created text channel: {name}")
+        return ch
+    except Exception as e:
+        print(f"Failed to create text channel {name}: {e}")
+        return None
+
+
+async def ensure_category_and_channels(guild: discord.Guild, cat_name: str, channels):
+    category = next((c for c in guild.categories if c.name == cat_name), None)
+    if not category:
         try:
             category = await guild.create_category(cat_name)
             print(f"Created category: {cat_name}")
         except Exception as e:
             print(f"Failed to create category {cat_name}: {e}")
-            category = None
-
-    if not category:
-        return
+            return None
+    else:
+        print(f"Category exists: {cat_name}")
 
     for ch_name, ch_type in channels:
-        final_name = ch_name
         if ch_type == "text":
-            existing_ch = discord.utils.get(category.text_channels, name=final_name)
-            if existing_ch:
-                print(f"Text channel exists in '{cat_name}': {final_name}")
+            existing = discord.utils.get(category.text_channels, name=ch_name)
+            if existing:
+                print(f"Text exists in {cat_name}: {ch_name}")
             else:
                 try:
-                    await category.create_text_channel(final_name)
-                    print(f"Created text channel '{final_name}' in category '{cat_name}'")
+                    await category.create_text_channel(ch_name)
+                    print(f"Created text channel '{ch_name}' in '{cat_name}'")
                 except Exception as e:
-                    print(f"Failed to create text channel '{final_name}' in '{cat_name}': {e}")
+                    print(f"Failed to create text channel '{ch_name}' in '{cat_name}': {e}")
         elif ch_type == "voice":
-            existing_vch = discord.utils.get(category.voice_channels, name=final_name)
-            if existing_vch:
-                print(f"Voice channel exists in '{cat_name}': {final_name}")
+            existing = discord.utils.get(category.voice_channels, name=ch_name)
+            if existing:
+                print(f"Voice exists in {cat_name}: {ch_name}")
             else:
                 try:
-                    await category.create_voice_channel(final_name)
-                    print(f"Created voice channel '{final_name}' in category '{cat_name}'")
+                    await category.create_voice_channel(ch_name)
+                    print(f"Created voice channel '{ch_name}' in '{cat_name}'")
                 except Exception as e:
-                    print(f"Failed to create voice channel '{final_name}' in '{cat_name}': {e}")
+                    print(f"Failed to create voice channel '{ch_name}' in '{cat_name}': {e}")
+    return category
+
+
+async def prepare_reaction_role_message(guild: discord.Guild):
+    # Найти канал ролей
+    roles_channel_name = None
+    for name, _ in TOP_CHANNELS:
+        if "роли" in name.lower():
+            roles_channel_name = name
+            break
+    if not roles_channel_name:
+        print("Roles channel name not found in TOP_CHANNELS")
+        return
+
+    roles_channel = discord.utils.get(guild.text_channels, name=roles_channel_name)
+    if not roles_channel:
+        print(f"Roles channel '{roles_channel_name}' not found, creating")
+        roles_channel = await guild.create_text_channel(roles_channel_name)
+
+    # Попробуем найти существующее сообщение от бота с маркером
+    existing_msg = None
+    try:
+        async for msg in roles_channel.history(limit=200):
+            if msg.author == client.user and REACTION_MESSAGE_MARKER in (msg.content or ""):
+                existing_msg = msg
+                break
+    except Exception as e:
+        print(f"Failed to read history of roles channel: {e}")
+
+    # Сформируем текст сообщения
+    lines = [f"{REACTION_MESSAGE_MARKER}\nВыберите роли, реагируя на эмодзи.\n"]
+    for emoji, role_name in ROLE_EMOJI_MAP.items():
+        lines.append(f"{emoji} — {role_name}")
+    content = "\n".join(lines)
+
+    if existing_msg:
+        try:
+            await existing_msg.edit(content=content)
+            message = existing_msg
+            print("Updated existing reaction-role message")
+        except Exception as e:
+            print(f"Failed to edit existing reaction-role message: {e}")
+            message = None
+    else:
+        try:
+            message = await roles_channel.send(content)
+            print("Sent new reaction-role message")
+        except Exception as e:
+            print(f"Failed to send reaction-role message: {e}")
+            message = None
+
+    # Добавим реакции к сообщению
+    if message:
+        for emoji in ROLE_EMOJI_MAP.keys():
+            try:
+                await message.add_reaction(emoji)
+            except Exception as e:
+                print(f"Failed to add reaction {emoji}: {e}")
+
+    return
+
 
 @client.event
 async def on_ready():
@@ -171,40 +235,107 @@ async def on_ready():
         await client.close()
         return
 
-    try:
-        guild = client.get_guild(int(guild_id))
-    except Exception as e:
-        print(f"ERROR: Invalid TARGET_GUILD_ID: {e}")
-        await client.close()
-        return
-
+    guild = client.get_guild(int(guild_id))
     if guild is None:
         print(f"ERROR: Bot is not in the guild with ID {guild_id} or cannot access it.")
         await client.close()
         return
 
-    # Роли
-    for base, emoji in ROLES:
-        await ensure_role(guild, base, emoji)
+    print(f"Preparing server structure in guild: {guild.name} ({guild.id})")
 
-    # Верхние корневые каналы
-    for ch_name, _ in ROOT_TEXT_CHANNELS:
+    # Создаём роли в нужном порядке
+    for base, emoji in ROLES:
+        name = f"{emoji} {base}"
+        await create_or_get_role(guild, name)
+
+    # Верхние каналы
+    for ch_name, _ in TOP_CHANNELS:
         await ensure_text_channel(guild, ch_name)
 
     # Важные
     for ch_name, _ in IMPORTANT_CHANNELS:
         await ensure_text_channel(guild, ch_name)
 
-    # Дополнительные корневые
+    # Дополнительные
     for ch_name, _ in EXTRA_ROOT:
         await ensure_text_channel(guild, ch_name)
 
-    # Категории и их каналы
-    for base, emoji, channels in CATEGORIES:
-        await ensure_category_and_channels(guild, base, emoji, channels)
+    # Категории и каналы
+    for cat_name, emoji, channels in CATEGORIES:
+        # cat_name уже содержит эмодзи/декор
+        await ensure_category_and_channels(guild, cat_name, channels)
 
-    print("All done — closing bot.")
-    await client.close()
+    # Подготовка сообщения с реакциями для самоназначения ролей
+    await prepare_reaction_role_message(guild)
+
+    print("Setup finished. Bot will continue running to handle role reactions.")
+
+
+@client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    # Игнорируем реакции от бота
+    if payload.user_id == client.user.id:
+        return
+
+    guild = client.get_guild(payload.guild_id)
+    if guild is None:
+        return
+
+    emoji = payload.emoji.name
+    if emoji not in ROLE_EMOJI_MAP:
+        return
+
+    role_base = ROLE_EMOJI_MAP[emoji]
+    # В ролях на сервере имя с эмодзи — формируем точно
+    # Найдём роль, где содержится base
+    role = next((r for r in guild.roles if role_base in r.name), None)
+    if role is None:
+        print(f"Role for reaction not found: {role_base}")
+        return
+
+    member = guild.get_member(payload.user_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(payload.user_id)
+        except Exception as e:
+            print(f"Failed to fetch member {payload.user_id}: {e}")
+            return
+
+    try:
+        await member.add_roles(role)
+        print(f"Added role {role.name} to {member.display_name}")
+    except Exception as e:
+        print(f"Failed to add role: {e}")
+
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    guild = client.get_guild(payload.guild_id)
+    if guild is None:
+        return
+
+    emoji = payload.emoji.name
+    if emoji not in ROLE_EMOJI_MAP:
+        return
+
+    role_base = ROLE_EMOJI_MAP[emoji]
+    role = next((r for r in guild.roles if role_base in r.name), None)
+    if role is None:
+        print(f"Role for reaction not found: {role_base}")
+        return
+
+    try:
+        member = await guild.fetch_member(payload.user_id)
+    except Exception as e:
+        print(f"Failed to fetch member on reaction remove: {e}")
+        return
+
+    try:
+        await member.remove_roles(role)
+        print(f"Removed role {role.name} from {member.display_name}")
+    except Exception as e:
+        print(f"Failed to remove role: {e}")
+
 
 if __name__ == "__main__":
     token = os.environ.get("DISCORD_TOKEN")
